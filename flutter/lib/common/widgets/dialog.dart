@@ -1,16 +1,18 @@
 import 'dart:async';
 
+import 'package:debounce_throttle/debounce_throttle.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_hbb/common/shared_state.dart';
 import 'package:get/get.dart';
 
 import '../../common.dart';
 import '../../models/model.dart';
 import '../../models/platform_model.dart';
 
-void clientClose(String id, OverlayDialogManager dialogManager) {
-  msgBox(id, 'info', 'Close', 'Are you sure to close the connection?', '',
-      dialogManager);
+void clientClose(SessionID sessionId, OverlayDialogManager dialogManager) {
+  msgBox(sessionId, 'info', 'Close', 'Are you sure to close the connection?',
+      '', dialogManager);
 }
 
 abstract class ValidationRule {
@@ -63,7 +65,7 @@ void changeIdDialog() {
     RegexValidationRule('allowed characters', RegExp(r'^\w*$'))
   ];
 
-  gFFI.dialogManager.show((setState, close) {
+  gFFI.dialogManager.show((setState, close, context) {
     submit() async {
       debugPrint("onSubmit");
       newId = controller.text.trim();
@@ -173,7 +175,7 @@ void changeWhiteList({Function()? callback}) async {
   var controller = TextEditingController(text: newWhiteListField);
   var msg = "";
   var isInProgress = false;
-  gFFI.dialogManager.show((setState, close) {
+  gFFI.dialogManager.show((setState, close, context) {
     return CustomAlertDialog(
       title: Text(translate("IP Whitelisting")),
       content: Column(
@@ -253,7 +255,7 @@ void changeWhiteList({Function()? callback}) async {
 Future<String> changeDirectAccessPort(
     String currentIP, String currentPort) async {
   final controller = TextEditingController(text: currentPort);
-  await gFFI.dialogManager.show((setState, close) {
+  await gFFI.dialogManager.show((setState, close, context) {
     return CustomAlertDialog(
       title: Text(translate("Change Local Port")),
       content: Column(
@@ -342,6 +344,7 @@ class DialogTextField extends StatelessWidget {
               helperText: helperText,
               helperMaxLines: 8,
               errorText: errorText,
+              errorMaxLines: 8,
             ),
             controller: controller,
             focusNode: focusNode,
@@ -420,17 +423,17 @@ class _PasswordWidgetState extends State<PasswordWidget> {
   }
 }
 
-void wrongPasswordDialog(
-    String id, OverlayDialogManager dialogManager, type, title, text) {
+void wrongPasswordDialog(SessionID sessionId,
+    OverlayDialogManager dialogManager, type, title, text) {
   dialogManager.dismissAll();
-  dialogManager.show((setState, close) {
+  dialogManager.show((setState, close, context) {
     cancel() {
       close();
       closeConnection();
     }
 
     submit() {
-      enterPasswordDialog(id, dialogManager);
+      enterPasswordDialog(sessionId, dialogManager);
     }
 
     return CustomAlertDialog(
@@ -452,17 +455,19 @@ void wrongPasswordDialog(
   });
 }
 
-void enterPasswordDialog(String id, OverlayDialogManager dialogManager) async {
+void enterPasswordDialog(
+    SessionID sessionId, OverlayDialogManager dialogManager) async {
   await _connectDialog(
-    id,
+    sessionId,
     dialogManager,
     passwordController: TextEditingController(),
   );
 }
 
-void enterUserLoginDialog(String id, OverlayDialogManager dialogManager) async {
+void enterUserLoginDialog(
+    SessionID sessionId, OverlayDialogManager dialogManager) async {
   await _connectDialog(
-    id,
+    sessionId,
     dialogManager,
     osUsernameController: TextEditingController(),
     osPasswordController: TextEditingController(),
@@ -470,9 +475,9 @@ void enterUserLoginDialog(String id, OverlayDialogManager dialogManager) async {
 }
 
 void enterUserLoginAndPasswordDialog(
-    String id, OverlayDialogManager dialogManager) async {
+    SessionID sessionId, OverlayDialogManager dialogManager) async {
   await _connectDialog(
-    id,
+    sessionId,
     dialogManager,
     osUsernameController: TextEditingController(),
     osPasswordController: TextEditingController(),
@@ -481,7 +486,7 @@ void enterUserLoginAndPasswordDialog(
 }
 
 _connectDialog(
-  String id,
+  SessionID sessionId,
   OverlayDialogManager dialogManager, {
   TextEditingController? osUsernameController,
   TextEditingController? osPasswordController,
@@ -489,14 +494,16 @@ _connectDialog(
 }) async {
   var rememberPassword = false;
   if (passwordController != null) {
-    rememberPassword = await bind.sessionGetRemember(id: id) ?? false;
+    rememberPassword =
+        await bind.sessionGetRemember(sessionId: sessionId) ?? false;
   }
   var rememberAccount = false;
   if (osUsernameController != null) {
-    rememberAccount = await bind.sessionGetRemember(id: id) ?? false;
+    rememberAccount =
+        await bind.sessionGetRemember(sessionId: sessionId) ?? false;
   }
   dialogManager.dismissAll();
-  dialogManager.show((setState, close) {
+  dialogManager.show((setState, close, context) {
     cancel() {
       close();
       closeConnection();
@@ -508,13 +515,15 @@ _connectDialog(
       final password = passwordController?.text.trim() ?? '';
       if (passwordController != null && password.isEmpty) return;
       if (rememberAccount) {
-        bind.sessionPeerOption(id: id, name: 'os-username', value: osUsername);
-        bind.sessionPeerOption(id: id, name: 'os-password', value: osPassword);
+        bind.sessionPeerOption(
+            sessionId: sessionId, name: 'os-username', value: osUsername);
+        bind.sessionPeerOption(
+            sessionId: sessionId, name: 'os-password', value: osPassword);
       }
       gFFI.login(
         osUsername,
         osPassword,
-        id,
+        sessionId,
         password,
         rememberPassword,
       );
@@ -647,18 +656,19 @@ _connectDialog(
 }
 
 void showWaitUacDialog(
-    String id, OverlayDialogManager dialogManager, String type) {
+    SessionID sessionId, OverlayDialogManager dialogManager, String type) {
   dialogManager.dismissAll();
   dialogManager.show(
-      tag: '$id-wait-uac',
-      (setState, close) => CustomAlertDialog(
+      tag: '$sessionId-wait-uac',
+      (setState, close, context) => CustomAlertDialog(
             title: null,
             content: msgboxContent(type, 'Wait', 'wait_accept_uac_tip'),
           ));
 }
 
 // Another username && password dialog?
-void showRequestElevationDialog(String id, OverlayDialogManager dialogManager) {
+void showRequestElevationDialog(
+    SessionID sessionId, OverlayDialogManager dialogManager) {
   RxString groupValue = ''.obs;
   RxString errUser = ''.obs;
   RxString errPwd = ''.obs;
@@ -671,103 +681,119 @@ void showRequestElevationDialog(String id, OverlayDialogManager dialogManager) {
     }
   }
 
-  const minTextStyle = TextStyle(fontSize: 14);
+  // TODO get from theme
+  final double fontSizeNote = 13.00;
 
-  var content = Obx(() => Column(children: [
-        Row(
-          children: [
-            Radio(
-                value: '',
-                groupValue: groupValue.value,
-                onChanged: onRadioChanged),
-            Expanded(
-                child:
-                    Text(translate('Ask the remote user for authentication'))),
-          ],
-        ),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: Text(
-                  translate(
-                      'Choose this if the remote account is administrator'),
-                  style: TextStyle(fontSize: 13))
-              .marginOnly(left: 40),
-        ).marginOnly(bottom: 15),
-        Row(
-          children: [
-            Radio(
-                value: 'logon',
-                groupValue: groupValue.value,
-                onChanged: onRadioChanged),
-            Expanded(
-              child: Text(translate(
-                  'Transmit the username and password of administrator')),
-            )
-          ],
-        ),
-        Row(
-          children: [
-            Expanded(
-                flex: 1,
+  Widget OptionRequestPermissions = Obx(
+    () => Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Radio(
+          visualDensity: VisualDensity(horizontal: -4, vertical: -4),
+          value: '',
+          groupValue: groupValue.value,
+          onChanged: onRadioChanged,
+        ).marginOnly(right: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              InkWell(
+                hoverColor: Colors.transparent,
+                onTap: () => groupValue.value = '',
                 child: Text(
-                  '${translate('Username')}:',
-                  style: minTextStyle,
-                ).marginOnly(right: 10)),
-            Expanded(
-              flex: 3,
-              child: TextField(
-                controller: userController,
-                style: minTextStyle,
-                decoration: InputDecoration(
-                    isDense: true,
-                    contentPadding: EdgeInsets.symmetric(vertical: 15),
-                    hintText: translate('eg: admin'),
-                    errorText: errUser.isEmpty ? null : errUser.value),
-                onChanged: (s) {
-                  if (s.isNotEmpty) {
-                    errUser.value = '';
-                  }
-                },
+                  translate('Ask the remote user for authentication'),
+                ),
+              ).marginOnly(bottom: 10),
+              Text(
+                translate('Choose this if the remote account is administrator'),
+                style: TextStyle(fontSize: fontSizeNote),
               ),
-            )
-          ],
-        ).marginOnly(left: 40),
-        Row(
-          children: [
-            Expanded(
-                flex: 1,
-                child: Text(
-                  '${translate('Password')}:',
-                  style: minTextStyle,
-                ).marginOnly(right: 10)),
-            Expanded(
-              flex: 3,
-              child: TextField(
-                controller: pwdController,
-                obscureText: true,
-                style: minTextStyle,
-                decoration: InputDecoration(
-                    isDense: true,
-                    contentPadding: EdgeInsets.symmetric(vertical: 15),
-                    errorText: errPwd.isEmpty ? null : errPwd.value),
-                onChanged: (s) {
-                  if (s.isNotEmpty) {
-                    errPwd.value = '';
-                  }
-                },
-              ),
+            ],
+          ).marginOnly(top: 3),
+        ),
+      ],
+    ),
+  );
+
+  Widget OptionCredentials = Obx(
+    () => Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Radio(
+          visualDensity: VisualDensity(horizontal: -4, vertical: -4),
+          value: 'logon',
+          groupValue: groupValue.value,
+          onChanged: onRadioChanged,
+        ).marginOnly(right: 10),
+        Expanded(
+          child: InkWell(
+            hoverColor: Colors.transparent,
+            onTap: () => onRadioChanged('logon'),
+            child: Text(
+              translate('Transmit the username and password of administrator'),
             ),
-          ],
-        ).marginOnly(left: 40),
-        Align(
-            alignment: Alignment.centerLeft,
-            child: Text(translate('still_click_uac_tip'),
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold))
-                .marginOnly(top: 20)),
-      ]));
+          ).marginOnly(top: 4),
+        ),
+      ],
+    ),
+  );
+
+  Widget UacNote = Container(
+    padding: EdgeInsets.fromLTRB(10, 8, 8, 8),
+    decoration: BoxDecoration(
+      color: MyTheme.currentThemeMode() == ThemeMode.dark
+          ? Color.fromARGB(135, 87, 87, 90)
+          : Colors.grey[100],
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: Colors.grey),
+    ),
+    child: Row(
+      children: [
+        Icon(Icons.info_outline_rounded, size: 20).marginOnly(right: 10),
+        Expanded(
+          child: Text(
+            translate('still_click_uac_tip'),
+            style: TextStyle(
+                fontSize: fontSizeNote, fontWeight: FontWeight.normal),
+          ),
+        )
+      ],
+    ),
+  );
+
+  var content = Obx(
+    () => Column(
+      children: [
+        OptionRequestPermissions.marginOnly(bottom: 15),
+        OptionCredentials,
+        Offstage(
+          offstage: 'logon' != groupValue.value,
+          child: Column(
+            children: [
+              UacNote.marginOnly(bottom: 10),
+              DialogTextField(
+                controller: userController,
+                title: translate('Username'),
+                hintText: translate('eg: admin'),
+                prefixIcon: DialogTextField.kUsernameIcon,
+                errorText: errUser.isEmpty ? null : errUser.value,
+              ),
+              PasswordWidget(
+                controller: pwdController,
+                autoFocus: false,
+                errorText: errPwd.isEmpty ? null : errPwd.value,
+              ),
+            ],
+          ).marginOnly(left: isDesktop ? 35 : 0),
+        ).marginOnly(top: 10),
+      ],
+    ),
+  );
 
   dialogManager.dismissAll();
-  dialogManager.show(tag: '$id-request-elevation', (setState, close) {
+  dialogManager.show(tag: '$sessionId-request-elevation',
+      (setState, close, context) {
     void submit() {
       if (groupValue.value == 'logon') {
         if (userController.text.isEmpty) {
@@ -779,11 +805,11 @@ void showRequestElevationDialog(String id, OverlayDialogManager dialogManager) {
           return;
         }
         bind.sessionElevateWithLogon(
-            id: id,
+            sessionId: sessionId,
             username: userController.text,
             password: pwdController.text);
       } else {
-        bind.sessionElevateDirect(id: id);
+        bind.sessionElevateDirect(sessionId: sessionId);
       }
     }
 
@@ -791,8 +817,17 @@ void showRequestElevationDialog(String id, OverlayDialogManager dialogManager) {
       title: Text(translate('Request Elevation')),
       content: content,
       actions: [
-        dialogButton('Cancel', onPressed: close, isOutline: true),
-        dialogButton('OK', onPressed: submit),
+        dialogButton(
+          'Cancel',
+          icon: Icon(Icons.close_rounded),
+          onPressed: close,
+          isOutline: true,
+        ),
+        dialogButton(
+          'OK',
+          icon: Icon(Icons.done_rounded),
+          onPressed: submit,
+        )
       ],
       onSubmit: submit,
       onCancel: close,
@@ -801,20 +836,20 @@ void showRequestElevationDialog(String id, OverlayDialogManager dialogManager) {
 }
 
 void showOnBlockDialog(
-  String id,
+  SessionID sessionId,
   String type,
   String title,
   String text,
   OverlayDialogManager dialogManager,
 ) {
-  if (dialogManager.existing('$id-wait-uac') ||
-      dialogManager.existing('$id-request-elevation')) {
+  if (dialogManager.existing('$sessionId-wait-uac') ||
+      dialogManager.existing('$sessionId-request-elevation')) {
     return;
   }
-  dialogManager.show(tag: '$id-$type', (setState, close) {
+  dialogManager.show(tag: '$sessionId-$type', (setState, close, context) {
     void submit() {
       close();
-      showRequestElevationDialog(id, dialogManager);
+      showRequestElevationDialog(sessionId, dialogManager);
     }
 
     return CustomAlertDialog(
@@ -831,12 +866,12 @@ void showOnBlockDialog(
   });
 }
 
-void showElevationError(String id, String type, String title, String text,
-    OverlayDialogManager dialogManager) {
-  dialogManager.show(tag: '$id-$type', (setState, close) {
+void showElevationError(SessionID sessionId, String type, String title,
+    String text, OverlayDialogManager dialogManager) {
+  dialogManager.show(tag: '$sessionId-$type', (setState, close, context) {
     void submit() {
       close();
-      showRequestElevationDialog(id, dialogManager);
+      showRequestElevationDialog(sessionId, dialogManager);
     }
 
     return CustomAlertDialog(
@@ -854,10 +889,10 @@ void showElevationError(String id, String type, String title, String text,
   });
 }
 
-void showWaitAcceptDialog(String id, String type, String title, String text,
-    OverlayDialogManager dialogManager) {
+void showWaitAcceptDialog(SessionID sessionId, String type, String title,
+    String text, OverlayDialogManager dialogManager) {
   dialogManager.dismissAll();
-  dialogManager.show((setState, close) {
+  dialogManager.show((setState, close, context) {
     onCancel() {
       closeConnection();
     }
@@ -873,13 +908,15 @@ void showWaitAcceptDialog(String id, String type, String title, String text,
   });
 }
 
-void showRestartRemoteDevice(
-    PeerInfo pi, String id, OverlayDialogManager dialogManager) async {
-  final res =
-      await dialogManager.show<bool>((setState, close) => CustomAlertDialog(
+void showRestartRemoteDevice(PeerInfo pi, String id, SessionID sessionId,
+    OverlayDialogManager dialogManager) async {
+  final res = await dialogManager
+      .show<bool>((setState, close, context) => CustomAlertDialog(
             title: Row(children: [
               Icon(Icons.warning_rounded, color: Colors.redAccent, size: 28),
-              Text(translate("Restart Remote Device")).paddingOnly(left: 10),
+              Flexible(
+                  child: Text(translate("Restart Remote Device"))
+                      .paddingOnly(left: 10)),
             ]),
             content: Text(
                 "${translate('Are you sure you want to restart')} \n${pi.username}@${pi.hostname}($id) ?"),
@@ -899,28 +936,39 @@ void showRestartRemoteDevice(
             onCancel: close,
             onSubmit: () => close(true),
           ));
-  if (res == true) bind.sessionRestartRemoteDevice(id: id);
+  if (res == true) bind.sessionRestartRemoteDevice(sessionId: sessionId);
 }
 
 showSetOSPassword(
-  String id,
+  SessionID sessionId,
   bool login,
   OverlayDialogManager dialogManager,
+  String? osPassword,
+  Function()? closeCallback,
 ) async {
   final controller = TextEditingController();
-  var password = await bind.sessionGetOption(id: id, arg: 'os-password') ?? '';
-  var autoLogin = await bind.sessionGetOption(id: id, arg: 'auto-login') != '';
-  controller.text = password;
-  dialogManager.show((setState, close) {
+  osPassword ??= await bind.sessionGetOption(sessionId: sessionId, arg: 'os-password') ?? '';
+  var autoLogin =
+      await bind.sessionGetOption(sessionId: sessionId, arg: 'auto-login') !=
+          '';
+  controller.text = osPassword;
+  dialogManager.show((setState, close, context) {
+    closeWithCallback([dynamic]) {
+      close();
+      if (closeCallback != null) closeCallback();
+    }
     submit() {
       var text = controller.text.trim();
-      bind.sessionPeerOption(id: id, name: 'os-password', value: text);
       bind.sessionPeerOption(
-          id: id, name: 'auto-login', value: autoLogin ? 'Y' : '');
+          sessionId: sessionId, name: 'os-password', value: text);
+      bind.sessionPeerOption(
+          sessionId: sessionId,
+          name: 'auto-login',
+          value: autoLogin ? 'Y' : '');
       if (text != '' && login) {
-        bind.sessionInputOsPassword(id: id, value: text);
+        bind.sessionInputOsPassword(sessionId: sessionId, value: text);
       }
-      close();
+      closeWithCallback();
     }
 
     return CustomAlertDialog(
@@ -954,7 +1002,7 @@ showSetOSPassword(
         dialogButton(
           "Cancel",
           icon: Icon(Icons.close_rounded),
-          onPressed: close,
+          onPressed: closeWithCallback,
           isOutline: true,
         ),
         dialogButton(
@@ -964,27 +1012,33 @@ showSetOSPassword(
         ),
       ],
       onSubmit: submit,
-      onCancel: close,
+      onCancel: closeWithCallback,
     );
   });
 }
 
 showSetOSAccount(
-  String id,
+  SessionID sessionId,
   OverlayDialogManager dialogManager,
 ) async {
   final usernameController = TextEditingController();
   final passwdController = TextEditingController();
-  var username = await bind.sessionGetOption(id: id, arg: 'os-username') ?? '';
-  var password = await bind.sessionGetOption(id: id, arg: 'os-password') ?? '';
+  var username =
+      await bind.sessionGetOption(sessionId: sessionId, arg: 'os-username') ??
+          '';
+  var password =
+      await bind.sessionGetOption(sessionId: sessionId, arg: 'os-password') ??
+          '';
   usernameController.text = username;
   passwdController.text = password;
-  dialogManager.show((setState, close) {
+  dialogManager.show((setState, close, context) {
     submit() {
       final username = usernameController.text.trim();
       final password = usernameController.text.trim();
-      bind.sessionPeerOption(id: id, name: 'os-username', value: username);
-      bind.sessionPeerOption(id: id, name: 'os-password', value: password);
+      bind.sessionPeerOption(
+          sessionId: sessionId, name: 'os-username', value: username);
+      bind.sessionPeerOption(
+          sessionId: sessionId, name: 'os-password', value: password);
       close();
     }
 
@@ -1046,4 +1100,224 @@ showSetOSAccount(
       onCancel: close,
     );
   });
+}
+
+showAuditDialog(FFI ffi) async {
+  final controller = TextEditingController(text: ffi.auditNote);
+  ffi.dialogManager.show((setState, close, context) {
+    submit() {
+      var text = controller.text;
+      bind.sessionSendNote(sessionId: ffi.sessionId, note: text);
+      ffi.auditNote = text;
+      close();
+    }
+
+    late final focusNode = FocusNode(
+      onKey: (FocusNode node, RawKeyEvent evt) {
+        if (evt.logicalKey.keyLabel == 'Enter') {
+          if (evt is RawKeyDownEvent) {
+            int pos = controller.selection.base.offset;
+            controller.text =
+                '${controller.text.substring(0, pos)}\n${controller.text.substring(pos)}';
+            controller.selection =
+                TextSelection.fromPosition(TextPosition(offset: pos + 1));
+          }
+          return KeyEventResult.handled;
+        }
+        if (evt.logicalKey.keyLabel == 'Esc') {
+          if (evt is RawKeyDownEvent) {
+            close();
+          }
+          return KeyEventResult.handled;
+        } else {
+          return KeyEventResult.ignored;
+        }
+      },
+    );
+
+    return CustomAlertDialog(
+      title: Text(translate('Note')),
+      content: SizedBox(
+          width: 250,
+          height: 120,
+          child: TextField(
+            autofocus: true,
+            keyboardType: TextInputType.multiline,
+            textInputAction: TextInputAction.newline,
+            decoration: const InputDecoration.collapsed(
+              hintText: 'input note here',
+            ),
+            maxLines: null,
+            maxLength: 256,
+            controller: controller,
+            focusNode: focusNode,
+          )),
+      actions: [
+        dialogButton('Cancel', onPressed: close, isOutline: true),
+        dialogButton('OK', onPressed: submit)
+      ],
+      onSubmit: submit,
+      onCancel: close,
+    );
+  });
+}
+
+void showConfirmSwitchSidesDialog(
+    SessionID sessionId, String id, OverlayDialogManager dialogManager) async {
+  dialogManager.show((setState, close, context) {
+    submit() async {
+      await bind.sessionSwitchSides(sessionId: sessionId);
+      closeConnection(id: id);
+    }
+
+    return CustomAlertDialog(
+      content: msgboxContent('info', 'Switch Sides',
+          'Please confirm if you want to share your desktop?'),
+      actions: [
+        dialogButton('Cancel', onPressed: close, isOutline: true),
+        dialogButton('OK', onPressed: submit),
+      ],
+      onSubmit: submit,
+      onCancel: close,
+    );
+  });
+}
+
+customImageQualityDialog(SessionID sessionId, String id, FFI ffi) async {
+  double qualityInitValue = 50;
+  double fpsInitValue = 30;
+  bool qualitySet = false;
+  bool fpsSet = false;
+  setCustomValues({double? quality, double? fps}) async {
+    if (quality != null) {
+      qualitySet = true;
+      await bind.sessionSetCustomImageQuality(
+          sessionId: sessionId, value: quality.toInt());
+    }
+    if (fps != null) {
+      fpsSet = true;
+      await bind.sessionSetCustomFps(sessionId: sessionId, fps: fps.toInt());
+    }
+    if (!qualitySet) {
+      qualitySet = true;
+      await bind.sessionSetCustomImageQuality(
+          sessionId: sessionId, value: qualityInitValue.toInt());
+    }
+    if (!fpsSet) {
+      fpsSet = true;
+      await bind.sessionSetCustomFps(
+          sessionId: sessionId, fps: fpsInitValue.toInt());
+    }
+  }
+
+  final btnClose = dialogButton('Close', onPressed: () async {
+    await setCustomValues();
+    ffi.dialogManager.dismissAll();
+  });
+
+  // quality
+  final quality = await bind.sessionGetCustomImageQuality(sessionId: sessionId);
+  qualityInitValue =
+      quality != null && quality.isNotEmpty ? quality[0].toDouble() : 50.0;
+  const qualityMinValue = 10.0;
+  const qualityMaxValue = 100.0;
+  if (qualityInitValue < qualityMinValue) {
+    qualityInitValue = qualityMinValue;
+  }
+  if (qualityInitValue > qualityMaxValue) {
+    qualityInitValue = qualityMaxValue;
+  }
+  final RxDouble qualitySliderValue = RxDouble(qualityInitValue);
+  final debouncerQuality = Debouncer<double>(
+    Duration(milliseconds: 1000),
+    onChanged: (double v) {
+      setCustomValues(quality: v);
+    },
+    initialValue: qualityInitValue,
+  );
+  final qualitySlider = Obx(() => Row(
+        children: [
+          Expanded(
+              flex: 3,
+              child: Slider(
+                value: qualitySliderValue.value,
+                min: qualityMinValue,
+                max: qualityMaxValue,
+                divisions: 18,
+                onChanged: (double value) {
+                  qualitySliderValue.value = value;
+                  debouncerQuality.value = value;
+                },
+              )),
+          Expanded(
+              flex: 1,
+              child: Text(
+                '${qualitySliderValue.value.round()}%',
+                style: const TextStyle(fontSize: 15),
+              )),
+          Expanded(
+              flex: 2,
+              child: Text(
+                translate('Bitrate'),
+                style: const TextStyle(fontSize: 15),
+              )),
+        ],
+      ));
+  // fps
+  final fpsOption =
+      await bind.sessionGetOption(sessionId: sessionId, arg: 'custom-fps');
+  fpsInitValue = fpsOption == null ? 30 : double.tryParse(fpsOption) ?? 30;
+  if (fpsInitValue < 5 || fpsInitValue > 120) {
+    fpsInitValue = 30;
+  }
+  final RxDouble fpsSliderValue = RxDouble(fpsInitValue);
+  final debouncerFps = Debouncer<double>(
+    Duration(milliseconds: 1000),
+    onChanged: (double v) {
+      setCustomValues(fps: v);
+    },
+    initialValue: qualityInitValue,
+  );
+  bool? direct;
+  try {
+    direct =
+        ConnectionTypeState.find(id).direct.value == ConnectionType.strDirect;
+  } catch (_) {}
+  final fpsSlider = Offstage(
+    offstage: (await bind.mainIsUsingPublicServer() && direct != true) ||
+        version_cmp(ffi.ffiModel.pi.version, '1.2.0') < 0,
+    child: Row(
+      children: [
+        Expanded(
+            flex: 3,
+            child: Obx((() => Slider(
+                  value: fpsSliderValue.value,
+                  min: 5,
+                  max: 120,
+                  divisions: 23,
+                  onChanged: (double value) {
+                    fpsSliderValue.value = value;
+                    debouncerFps.value = value;
+                  },
+                )))),
+        Expanded(
+            flex: 1,
+            child: Obx(() => Text(
+                  '${fpsSliderValue.value.round()}',
+                  style: const TextStyle(fontSize: 15),
+                ))),
+        Expanded(
+            flex: 2,
+            child: Text(
+              translate('FPS'),
+              style: const TextStyle(fontSize: 15),
+            ))
+      ],
+    ),
+  );
+
+  final content = Column(
+    children: [qualitySlider, fpsSlider],
+  );
+  msgBoxCommon(ffi.dialogManager, 'Custom Image Quality', content, [btnClose]);
 }

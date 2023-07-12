@@ -5,7 +5,6 @@ use crate::{
 use hbb_common::{allow_err, bail, lazy_static, log, tokio, ResultType};
 use std::{
     ffi::CString,
-    os::windows::process::CommandExt,
     sync::Mutex,
     time::{Duration, Instant},
 };
@@ -22,20 +21,24 @@ use winapi::{
         libloaderapi::{GetModuleHandleA, GetModuleHandleExA, GetProcAddress},
         memoryapi::{VirtualAllocEx, WriteProcessMemory},
         processthreadsapi::{
-            CreateProcessAsUserW, GetCurrentThreadId, QueueUserAPC, ResumeThread,
+            CreateProcessAsUserW, GetCurrentThreadId, QueueUserAPC, ResumeThread, TerminateProcess,
             PROCESS_INFORMATION, STARTUPINFOW,
         },
-        winbase::{
-            WTSGetActiveConsoleSessionId, CREATE_NO_WINDOW, CREATE_SUSPENDED, DETACHED_PROCESS,
-        },
+        winbase::{WTSGetActiveConsoleSessionId, CREATE_SUSPENDED, DETACHED_PROCESS},
         winnt::{MEM_COMMIT, PAGE_READWRITE},
         winuser::*,
     },
 };
 
 pub const ORIGIN_PROCESS_EXE: &'static str = "C:\\Windows\\System32\\RuntimeBroker.exe";
-pub const INJECTED_PROCESS_EXE: &'static str = "RuntimeBroker_rustdesk.exe";
+pub const WIN_MAG_INJECTED_PROCESS_EXE: &'static str = "RuntimeBroker_rustdesk.exe";
+pub const INJECTED_PROCESS_EXE: &'static str = WIN_MAG_INJECTED_PROCESS_EXE;
 pub const PRIVACY_WINDOW_NAME: &'static str = "RustDeskPrivacyWindow";
+
+pub const OCCUPIED: &'static str = "Privacy occupied by another one";
+pub const TURN_OFF_OTHER_ID: &'static str =
+    "Failed to turn off privacy mode that belongs to someone else";
+pub const NO_DISPLAYS: &'static str = "No displays";
 
 pub const GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT: u32 = 2;
 pub const GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS: u32 = 4;
@@ -43,7 +46,6 @@ pub const GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS: u32 = 4;
 const WM_USER_EXIT_HOOK: u32 = WM_USER + 1;
 
 lazy_static::lazy_static! {
-    static ref DLL_FOUND: Mutex<bool> = Mutex::new(false);
     static ref CONN_ID: Mutex<i32> = Mutex::new(0);
     static ref CUR_HOOK_THREAD_ID: Mutex<DWORD> = Mutex::new(0);
     static ref WND_HANDLERS: Mutex<WindowHandlers> = Mutex::new(WindowHandlers{hthread: 0, hprocess: 0});
@@ -56,16 +58,27 @@ struct WindowHandlers {
 
 impl Drop for WindowHandlers {
     fn drop(&mut self) {
+        self.reset();
+    }
+}
+
+impl WindowHandlers {
+    fn reset(&mut self) {
         unsafe {
+            if self.hprocess != 0 {
+                let _res = TerminateProcess(self.hprocess as _, 0);
+                CloseHandle(self.hprocess as _);
+            }
+            self.hprocess = 0;
             if self.hthread != 0 {
                 CloseHandle(self.hthread as _);
             }
             self.hthread = 0;
-            if self.hprocess != 0 {
-                CloseHandle(self.hprocess as _);
-            }
-            self.hprocess = 0;
         }
+    }
+
+    fn is_default(&self) -> bool {
+        self.hthread == 0 && self.hprocess == 0
     }
 }
 
@@ -82,7 +95,7 @@ pub fn turn_on_privacy(conn_id: i32) -> ResultType<bool> {
         );
     }
 
-    if !*DLL_FOUND.lock().unwrap() {
+    if WND_HANDLERS.lock().unwrap().is_default() {
         log::info!("turn_on_privacy, dll not found when started, try start");
         start()?;
         std::thread::sleep(std::time::Duration::from_millis(1_000));
@@ -152,8 +165,6 @@ pub fn start() -> ResultType<()> {
             dll_file.to_string_lossy().as_ref()
         );
     }
-
-    *DLL_FOUND.lock().unwrap() = true;
 
     let hwnd = wait_find_privacy_hwnd(1_000)?;
     if !hwnd.is_null() {
@@ -254,6 +265,11 @@ pub fn start() -> ResultType<()> {
     Ok(())
 }
 
+#[inline]
+pub fn stop() {
+    WND_HANDLERS.lock().unwrap().reset();
+}
+
 unsafe fn inject_dll<'a>(hproc: HANDLE, hthread: HANDLE, dll_file: &'a str) -> ResultType<()> {
     let dll_file_utf16: Vec<u16> = dll_file.encode_utf16().chain(Some(0).into_iter()).collect();
 
@@ -315,14 +331,6 @@ fn wait_find_privacy_hwnd(msecs: u128) -> ResultType<HWND> {
 
         std::thread::sleep(Duration::from_millis(100));
     }
-}
-
-pub fn is_process_consent_running() -> ResultType<bool> {
-    let output = std::process::Command::new("cmd")
-        .args(&["/C", "tasklist | findstr consent.exe"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()?;
-    Ok(output.status.success() && !output.stdout.is_empty())
 }
 
 #[tokio::main(flavor = "current_thread")]

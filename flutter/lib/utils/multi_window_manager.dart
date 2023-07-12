@@ -84,10 +84,12 @@ class RustDeskMultiWindowManager {
     }
   }
 
-  Future<dynamic> newFileTransfer(String remoteId, {bool? forceRelay}) async {
+  Future<dynamic> newFileTransfer(String remoteId,
+      {String? password, bool? forceRelay}) async {
     var msg = jsonEncode({
       "type": WindowType.FileTransfer.index,
       "id": remoteId,
+      "password": password,
       "forceRelay": forceRelay,
     });
 
@@ -117,11 +119,12 @@ class RustDeskMultiWindowManager {
   }
 
   Future<dynamic> newPortForward(String remoteId, bool isRDP,
-      {bool? forceRelay}) async {
+      {String? password, bool? forceRelay}) async {
     final msg = jsonEncode({
       "type": WindowType.PortForward.index,
       "id": remoteId,
       "isRDP": isRDP,
+      "password": password,
       "forceRelay": forceRelay,
     });
 
@@ -218,6 +221,8 @@ class RustDeskMultiWindowManager {
         }
         await WindowController.fromWindowId(wId).setPreventClose(false);
         await WindowController.fromWindowId(wId).close();
+        // unregister the sub window in the main window.
+        unregisterActiveWindow(wId);
       } catch (e) {
         debugPrint("$e");
         return;
